@@ -2,6 +2,8 @@ package com.simpletools.sensorlab.core.measurement
 
 import com.simpletools.sensorlab.core.sensors.SensorKind
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
 enum class RecorderState { IDLE, RECORDING, PAUSED, FINISHED, FAILED }
@@ -83,7 +85,12 @@ class SessionRecorder(
     val elapsedMs: Long get() = lastElapsedNs / 1_000_000
 
     private var finalSummary: SessionSummary? = null
-    private val stats = RunningStats()
+    /** Serialises sample handling, batch flushes and finalisation (they all suspend on the store). */
+    private val lock = Mutex()
+    /** Statistics / duration of what is really persisted: the summary never describes lost samples. */
+    private val persistedStats = RunningStats()
+    private var persistedElapsedNs = 0L
+    private var persistedCount = 0
     private val batch = ArrayList<SampleRow>()
     private var startedAtMs = 0L
     private var firstTs = Long.MIN_VALUE
@@ -121,7 +128,11 @@ class SessionRecorder(
     }
 
     /** Feed one transformed sample. Cheap unless a batch is flushed. */
-    suspend fun onSample(timestampNs: Long, values: FloatArray, scalar: Float) {
+    suspend fun onSample(timestampNs: Long, values: FloatArray, scalar: Float) = lock.withLock {
+        handleSample(timestampNs, values, scalar)
+    }
+
+    private suspend fun handleSample(timestampNs: Long, values: FloatArray, scalar: Float) {
         if (state != RecorderState.RECORDING) return
         if (firstTs == Long.MIN_VALUE) {
             firstTs = timestampNs
@@ -155,12 +166,11 @@ class SessionRecorder(
                 values.getOrElse(0) { 0f }, values.getOrElse(1) { 0f }, values.getOrElse(2) { 0f }, scalar,
             ),
         )
-        stats.add(scalar.toDouble())
         sampleCount++
         if (batch.size >= policy.batchSize) flush()
         if (state == RecorderState.RECORDING && sampleCount >= policy.maxSamplesPerSession) {
             stopReason = StopReason.LIMIT_REACHED
-            finish()
+            finishLocked()
         }
     }
 
@@ -170,6 +180,9 @@ class SessionRecorder(
         val rows = ArrayList(batch)
         try {
             store.append(id, rows)
+            for (r in rows) persistedStats.add(r.scalar.toDouble())
+            persistedElapsedNs = rows.last().tUs * 1000
+            persistedCount += rows.size
             batch.clear()
         } catch (e: CancellationException) {
             throw e
@@ -188,16 +201,18 @@ class SessionRecorder(
      * Writes the remaining samples and the summary. Safe to call in any state; after a storage
      * failure it makes a best effort to mark the session INTERRUPTED so earlier data stays usable.
      */
-    suspend fun finish(): SessionSummary? {
+    suspend fun finish(): SessionSummary? = lock.withLock { finishLocked() }
+
+    private suspend fun finishLocked(): SessionSummary? {
         val id = sessionId
         if (id == null) return null
         if (state == RecorderState.FINISHED) return finalSummary
         val failed = state == RecorderState.FAILED
         if (!failed) flush()
-        val durationMs = lastElapsedNs / 1_000_000
-        val rate = if (sampleCount > 1 && lastElapsedNs > 0) (sampleCount - 1) / (lastElapsedNs / 1e9) else 0.0
-        // Rows still in `batch` were never persisted (only possible after a storage failure).
-        val summary = SessionSummary(nowMs(), durationMs, sampleCount - batch.size, rate, stats.snapshot())
+        // Only persisted rows count (rows left in `batch` exist after a storage failure only).
+        val durationMs = persistedElapsedNs / 1_000_000
+        val rate = if (persistedCount > 1 && persistedElapsedNs > 0) (persistedCount - 1) / (persistedElapsedNs / 1e9) else 0.0
+        val summary = SessionSummary(nowMs(), durationMs, persistedCount, rate, persistedStats.snapshot())
         val wasFailed = state == RecorderState.FAILED
         try {
             store.complete(id, summary, if (wasFailed) SessionStatus.INTERRUPTED else SessionStatus.COMPLETED)

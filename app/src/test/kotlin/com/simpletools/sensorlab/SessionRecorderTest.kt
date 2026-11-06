@@ -6,6 +6,8 @@ import com.simpletools.sensorlab.core.measurement.SessionStatus
 import com.simpletools.sensorlab.core.measurement.StopReason
 import com.simpletools.sensorlab.core.measurement.StoragePolicy
 import com.simpletools.sensorlab.core.sensors.SensorKind
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -157,5 +159,42 @@ class SessionRecorderTest {
         r.start("x", "raw", "")
         assertEquals(RecorderState.FAILED, r.state)
         assertNull(r.finish())
+    }
+
+    @Test fun interruptedSummaryDescribesOnlyPersistedSamples() = runTest {
+        val store = InMemoryStore()
+        val r = recorder(store, StoragePolicy(batchSize = 10))
+        r.start("stats", "raw", "")
+        r.feed(0, 10, v = 1f)          // persisted: all 1
+        store.failAppend = true
+        r.feed(100, 10, v = 100f)      // lost batch: all 100
+        val s = r.finish()!!
+        assertEquals(10, s.sampleCount)
+        assertEquals(1.0, s.stats.mean, 1e-9)
+        assertEquals(1.0, s.stats.max, 1e-9)
+        assertEquals(90, s.durationMs)
+    }
+
+    @Test fun finishDuringAnInFlightWriteLosesNothingAndDoesNotDuplicate() = runTest {
+        val slow = object : com.simpletools.sensorlab.core.measurement.SessionStore {
+            val inner = InMemoryStore()
+            override suspend fun create(session: com.simpletools.sensorlab.core.measurement.NewSession) = inner.create(session)
+            override suspend fun append(sessionId: String, rows: List<com.simpletools.sensorlab.core.measurement.SampleRow>) {
+                kotlinx.coroutines.delay(50)
+                if (inner.rows.any { e -> rows.any { it.idx == e.idx } }) throw IllegalStateException("duplicate idx")
+                inner.append(sessionId, rows)
+            }
+            override suspend fun complete(sessionId: String, summary: com.simpletools.sensorlab.core.measurement.SessionSummary, status: SessionStatus) =
+                inner.complete(sessionId, summary, status)
+        }
+        val r = SessionRecorder(slow, SensorKind.ACCELEROMETER, StoragePolicy(batchSize = 10), nowMs = { 1L }, newId = { "x" })
+        r.start("race", "raw", "")
+        val feeder = launch { r.feed(0, 30) }       // keeps flushing batches (slowly)
+        delay(20)                                    // a flush is now in flight
+        val summary = r.finish()                                        // user taps Finish
+        feeder.join()
+        assertEquals(SessionStatus.COMPLETED, slow.inner.status)
+        assertEquals(slow.inner.rows.size, summary!!.sampleCount)
+        assertEquals(slow.inner.rows.map { it.idx }.distinct().size, slow.inner.rows.size)
     }
 }

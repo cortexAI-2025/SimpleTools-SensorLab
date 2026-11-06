@@ -117,7 +117,8 @@ class SensorViewModel(private val kind: SensorKind, private val container: AppCo
         streamJob?.cancel()
         runningPeriodUs = settings.sampling.periodUs
         sawSample = false
-        rate.reset(); transform.reset(); t0Ns = Long.MIN_VALUE
+        // New time origin => the chart history of the previous origin must go too.
+        rate.reset(); transform.reset(); window.clear(); t0Ns = Long.MIN_VALUE
         streamJob = viewModelScope.launch {
             container.sensorSource.stream(info, runningPeriodUs)
                 .catch {
