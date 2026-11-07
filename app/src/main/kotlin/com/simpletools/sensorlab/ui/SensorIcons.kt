@@ -76,7 +76,14 @@ object SensorIcons {
         moveTo(2f, 17f); lineTo(6f, 17f); lineTo(9f, 12f); lineTo(12f, 20f); lineTo(15f, 15f); lineTo(22f, 15f)
     }
 
+    private val proximity = icon("proximity") {
+        moveTo(4f, 20f); lineTo(4f, 15f); arcTo(8f, 8f, 0f, false, true, 20f, 15f); lineTo(20f, 20f)
+        moveTo(8f, 20f); lineTo(8f, 15f); arcTo(4f, 4f, 0f, false, true, 16f, 15f); lineTo(16f, 20f)
+        circle(12f, 15f, 1.2f)
+    }
+
     fun of(kind: SensorKind): ImageVector = when (kind) {
+        SensorKind.PROXIMITY -> proximity
         SensorKind.ACCELEROMETER -> accel
         SensorKind.LINEAR_ACCELERATION -> linear
         SensorKind.GYROSCOPE -> gyro

@@ -136,3 +136,25 @@ class CsvExportTest {
         assertEquals(1, csv.removePrefix("\uFEFF").trimEnd().split("\r\n").size)
     }
 }
+
+class ComparisonManyTest {
+    // 16. comparison of several sessions against one reference
+    @Test fun eachSessionIsComparedToTheReference() {
+        val ref = session("ref", mean = 10.0, min = 8.0, max = 12.0, rms = 10.5, durationMs = 5000)
+        val b = session("b", mean = 12.0, min = 8.0, max = 14.0, rms = 12.0, durationMs = 5000)
+        val c = session("c", mean = 5.0, min = 4.0, max = 6.0, rms = 5.2, durationMs = 10_000)
+        val results = listOf(b, c).map { SessionComparison.compare(ref, it) }
+        assertEquals(2.0, results[0].mean.absolute!!, 1e-9)
+        assertEquals(20.0, results[0].mean.percent(true)!!, 1e-9)
+        assertEquals(-5.0, results[1].mean.absolute!!, 1e-9)
+        assertEquals(-50.0, results[1].mean.percent(true)!!, 1e-9)
+        assertEquals(100.0, results[1].duration.percent(true)!!, 1e-9)
+    }
+
+    @Test fun aSessionOfAnotherSensorCannotJoinTheGroup() {
+        val ref = session("ref", SensorKind.ACCELEROMETER)
+        val other = session("x", SensorKind.GYROSCOPE, unit = "rad/s")
+        assertEquals(Compatibility.Incompatible(Compatibility.Reason.SENSOR_TYPE), SessionComparison.check(ref, other))
+        assertTrue(SessionComparison.candidatesFor(ref, listOf(ref, other)).isEmpty())
+    }
+}

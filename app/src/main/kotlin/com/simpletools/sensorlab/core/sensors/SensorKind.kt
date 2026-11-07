@@ -42,6 +42,10 @@ enum class SensorKind(
         "light", R.string.sensor_light, R.string.sensor_light_desc,
         Sensor.TYPE_LIGHT, listOf(""), "lx", "raw",
     ),
+    PROXIMITY(
+        "proximity", R.string.sensor_proximity, R.string.sensor_proximity_desc,
+        Sensor.TYPE_PROXIMITY, listOf(""), "cm", "raw",
+    ),
     PRESSURE(
         "pressure", R.string.sensor_pressure, R.string.sensor_pressure_desc,
         Sensor.TYPE_PRESSURE, listOf(""), "hPa", "raw",

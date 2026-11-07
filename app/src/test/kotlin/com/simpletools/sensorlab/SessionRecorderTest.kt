@@ -149,6 +149,19 @@ class SessionRecorderTest {
         assertEquals(10, store.rows.size)
     }
 
+    @Test fun nonFiniteReadingsAreDroppedAndDoNotBreakTheSession() = runTest {
+        val store = InMemoryStore()
+        val r = recorder(store)
+        r.start("nan", "raw", "")
+        r.onSample(0, floatArrayOf(Float.NaN, 0f, 0f), Float.NaN)
+        r.onSample(10 * ms, floatArrayOf(1f, 0f, 0f), 1f)
+        r.onSample(20 * ms, floatArrayOf(2f, Float.POSITIVE_INFINITY, 0f), 2f)
+        val s = r.finish()!!
+        assertEquals(RecorderState.FINISHED, r.state)
+        assertEquals(1, store.rows.size)
+        assertEquals(1, s.sampleCount)
+    }
+
     @Test fun failureToCreateSessionIsReportedNotThrown() = runTest {
         val failing = object : com.simpletools.sensorlab.core.measurement.SessionStore {
             override suspend fun create(session: com.simpletools.sensorlab.core.measurement.NewSession) = throw java.io.IOException("no space")

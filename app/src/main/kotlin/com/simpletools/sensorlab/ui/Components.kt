@@ -146,3 +146,12 @@ fun MessageBox(text: String, modifier: Modifier = Modifier, isError: Boolean = f
         )
     }
 }
+
+/** Shown in place of a PRO feature: says what is kept, and offers the unlock. */
+@Composable
+fun LockedCard(title: String, body: String, onUnlock: () -> Unit, modifier: Modifier = Modifier) {
+    SectionCard(modifier, title = title) {
+        Text(body, style = MaterialTheme.typography.bodyMedium)
+        BigButton(stringResource(R.string.pro_unlock), onUnlock, Modifier.fillMaxWidth())
+    }
+}

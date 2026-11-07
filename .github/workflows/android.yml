@@ -118,3 +118,63 @@ jobs:
             dist/SimpleTools-SensorLab-debug.apk.sha256
           if-no-files-found: error
           retention-days: 30
+
+  release-unsigned:
+    name: Release build (unsigned AAB + APK)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Android SDK packages
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      # No signing secret is configured on purpose: both outputs are unsigned and must be signed
+      # with the upload key before any store submission.
+      - name: Build release APK and AAB (minified, unsigned)
+        run: ./gradlew :app:assembleRelease :app:bundleRelease
+
+      - name: Verify the outputs exist and are not empty
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          for f in "$APK" "$AAB"; do
+            if [ ! -s "$f" ]; then echo "::error::Missing release output: $f"; exit 1; fi
+          done
+
+      - name: Audit release APK permissions
+        run: ./scripts/check-apk-permissions.sh app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Collect unsigned outputs and SHA-256
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          cp app/build/outputs/bundle/release/app-release.aab dist-release/SimpleTools-SensorLab-release-unsigned.aab
+          cp app/build/outputs/apk/release/app-release-unsigned.apk dist-release/SimpleTools-SensorLab-release-unsigned.apk
+          cd dist-release
+          sha256sum *.aab *.apk | tee SHA256SUMS.txt
+          {
+            echo "### Release (unsigned)"
+            echo "- AAB size: $(stat -c %s SimpleTools-SensorLab-release-unsigned.aab) bytes"
+            echo "- APK size: $(stat -c %s SimpleTools-SensorLab-release-unsigned.apk) bytes"
+            cat SHA256SUMS.txt | sed 's/^/- `/; s/  /` /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unsigned release artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: SimpleTools-SensorLab-Android-AAB-unsigned
+          path: dist-release/
+          if-no-files-found: error
+          retention-days: 30

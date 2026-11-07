@@ -15,6 +15,7 @@
 | Kotlin | 2.3.21 | stable, Compose compiler plugin of the same version |
 | KSP | 2.3.13 | Room compiler |
 | Compose BOM | 2025.12.01 | newer AndroidX requires AGP 9.1+ and compileSdk 37 |
+| Play Billing Library | 8.3.0 | PRO purchase (see docs/PRO_BILLING.md) |
 | Room / DataStore / Navigation / Lifecycle | 2.8.3 / 1.1.7 / 2.9.6 / 2.9.4 | pinned in `gradle/libs.versions.toml` |
 
 Upgrading to AGP 9 + latest AndroidX is a tracked follow-up, not a V1 requirement.
@@ -26,8 +27,9 @@ Upgrading to AGP 9 + latest AndroidX is a tracked follow-up, not a V1 requiremen
 ./gradlew :app:testDebugUnitTest           # unit + Robolectric tests
 ./gradlew :app:lintDebug                   # Android lint (errors fail the build)
 ./gradlew :app:assembleDebug               # APK in app/build/outputs/apk/debug/
+./gradlew :app:assembleRelease :app:bundleRelease   # unsigned APK and AAB (minified)
 ./scripts/check-hygiene.sh                 # privacy guard (no permission/SDK/secret)
-./scripts/check-apk-permissions.sh app/build/outputs/apk/debug/app-debug.apk
+./scripts/check-apk-permissions.sh app/build/outputs/apk/debug/app-debug.apk   # only library-declared entries allowed
 ```
 
 Optional local environment variables (CI does not need them):
@@ -50,3 +52,7 @@ GitHub → *Actions* → select the run → *Artifacts* → `SimpleTools-SensorL
 ### Install on the phone
 
 Enable *install unknown apps* for your browser/file manager, copy the APK to the phone, open it. The debug APK is signed with the standard Android debug key: it is for testing, not for store distribution.
+
+## Release outputs (unsigned)
+
+Job `release-unsigned` runs `assembleRelease` and `bundleRelease` without any signing secret. Artifact `SimpleTools-SensorLab-Android-AAB-unsigned` contains `SimpleTools-SensorLab-release-unsigned.aab`, `...-release-unsigned.apk` and `SHA256SUMS.txt`. Sign with the upload key before uploading to Google Play.

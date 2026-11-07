@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.simpletools.sensorlab.core.database.SessionEntity
 import com.simpletools.sensorlab.core.database.SessionRepository
+import com.simpletools.sensorlab.core.export.SessionJson
 import com.simpletools.sensorlab.core.measurement.DisplayUnits
 import com.simpletools.sensorlab.core.settings.AppSettings
 import com.simpletools.sensorlab.core.settings.SettingsRepository
@@ -17,6 +18,7 @@ import java.io.OutputStream
 
 enum class ExportFormat(val extension: String, val mime: String) {
     CSV("csv", "text/csv"),
+    JSON("json", "application/json"),
     PDF("pdf", "application/pdf"),
 }
 
@@ -37,6 +39,9 @@ class ExportService(
         when (format) {
             ExportFormat.CSV -> CsvExporter(s.csvFormat).write(session, out) { from, limit ->
                 repository.samplesPage(sessionId, from, limit)
+            }
+            ExportFormat.JSON -> SessionJson.writeSessionFile(out, session) { id, from, limit ->
+                repository.samplesPage(id, from, limit)
             }
             ExportFormat.PDF -> {
                 val chart = repository.chartSamples(sessionId, session.sampleCount)

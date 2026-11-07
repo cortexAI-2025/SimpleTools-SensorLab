@@ -45,8 +45,9 @@ class SensorViewModelTest {
 
     @After fun tearDown() { Dispatchers.resetMain(); db.close() }
 
-    private fun container(source: SimulatedSensorSource) =
-        AppContainer(app, source, { db }, FakeSettingsRepository())
+    private fun container(source: SimulatedSensorSource, pro: Boolean = true): AppContainer =
+        AppContainer(app, source, { db }, FakeSettingsRepository(), FakeBillingGateway(), InMemoryLicenseStore(pro))
+            .also { runBlocking { it.license.awaitReady() } }
 
     private fun TestDispatcher.settle() { scheduler.runCurrent() }
 
@@ -142,6 +143,19 @@ class SensorViewModelTest {
         assertEquals("light", saved.kindKey)
         assertTrue(saved.sampleCount >= 35)
         assertEquals(runBlocking { c.sessions.observeAll().first() }.size, 1)
+        vm.onStop(false)
+    }
+
+    // PRO gate: the free version never starts a recording, even if the control were reachable
+    @Test fun freeVersionCannotRecord() {
+        val src = SimulatedSensorSource(setOf(SensorKind.ACCELEROMETER))
+        val c = container(src, pro = false)
+        val vm = SensorViewModel(SensorKind.ACCELEROMETER, c)
+        vm.onStart(); dispatcher.settle()
+        emit(src, 5, stepMs = 100)
+        vm.startRecording("Libre"); dispatcher.settle()
+        assertEquals(RecorderState.IDLE, vm.ui.value.recording.state)
+        assertTrue(runBlocking { c.sessions.observeAll().first() }.isEmpty())
         vm.onStop(false)
     }
 

@@ -20,6 +20,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -51,6 +53,8 @@ import com.simpletools.sensorlab.core.settings.AppSettings
 import com.simpletools.sensorlab.ui.BigButton
 import com.simpletools.sensorlab.ui.ChartColors
 import com.simpletools.sensorlab.ui.LabeledValue
+import com.simpletools.sensorlab.ui.LockedCard
+import com.simpletools.sensorlab.ui.ProPaywallDialog
 import com.simpletools.sensorlab.ui.MessageBox
 import com.simpletools.sensorlab.ui.ScreenPadding
 import com.simpletools.sensorlab.ui.SectionCard
@@ -69,6 +73,8 @@ fun SensorScreen(kind: SensorKind, container: AppContainer, onOpenSession: (Stri
     // LocalActivity, not LocalContext: the context is wrapped to apply the in-app language.
     val activity = LocalActivity.current
     val scope = rememberCoroutineScope()
+    val pro by container.license.state.collectAsStateWithLifecycle()
+    var showPaywall by remember { mutableStateOf(false) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.onStart() }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.onStop(configChange = activity?.isChangingConfigurations == true) }
@@ -103,9 +109,11 @@ fun SensorScreen(kind: SensorKind, container: AppContainer, onOpenSession: (Stri
 
         ChartCard(kind, state, units, settings) { w -> scope.launch { container.settings.update { it.copy(chartWindowS = w) } } }
         StatsCard(kind, state, units) { vm.resetLiveStats() }
-        RecordingCard(kind, state, vm, onOpenSession)
+        RecordingCard(kind, state, vm, onOpenSession, isPro = pro.isPro, onUnlock = { showPaywall = true })
         InfoCard(state, kind, units)
     }
+
+    if (showPaywall) ProPaywallDialog(container.license) { showPaywall = false }
 }
 
 private fun unavailableMessage(kind: SensorKind) = when (kind) {
@@ -179,6 +187,7 @@ private fun LiveValuesCard(kind: SensorKind, s: SensorUiState, units: DisplayUni
             }
         }
         LabeledValue(stringResource(R.string.live_rate), s.observedHz?.let { "%.1f Hz".format(it) } ?: "—")
+        if (s.accuracy >= 0) LabeledValue(stringResource(R.string.live_accuracy), stringResource(accuracyLabel(s.accuracy)))
     }
 }
 
@@ -210,6 +219,7 @@ private fun KindExtras(kind: SensorKind, s: SensorUiState, units: DisplayUnits, 
             Text(stringResource(R.string.light_disclaimer), style = MaterialTheme.typography.bodySmall)
         }
         SensorKind.PRESSURE -> MessageBox(stringResource(R.string.baro_no_altitude))
+        SensorKind.PROXIMITY -> MessageBox(stringResource(R.string.proximity_note))
         SensorKind.INCLINOMETER -> InclinometerCard(s, vm)
         SensorKind.VIBRATION -> SectionCard(title = stringResource(R.string.vib_title)) {
             LabeledValue(stringResource(R.string.vib_rms), if (s.vibrationRms.isNaN()) "—" else "%.4f m/s²".format(s.vibrationRms))
@@ -370,7 +380,18 @@ private fun StatCell(label: String, value: String) {
 }
 
 @Composable
-private fun RecordingCard(kind: SensorKind, s: SensorUiState, vm: SensorViewModel, onOpenSession: (String) -> Unit) {
+private fun RecordingCard(
+    kind: SensorKind, s: SensorUiState, vm: SensorViewModel, onOpenSession: (String) -> Unit,
+    isPro: Boolean, onUnlock: () -> Unit,
+) {
+    if (!isPro) {
+        LockedCard(
+            title = stringResource(R.string.rec_title),
+            body = stringResource(R.string.locked_body_recording),
+            onUnlock = onUnlock,
+        )
+        return
+    }
     val rec = s.recording
     val name = "${stringResource(kind.nameRes)} ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date())}"
     SectionCard(title = stringResource(R.string.rec_title)) {

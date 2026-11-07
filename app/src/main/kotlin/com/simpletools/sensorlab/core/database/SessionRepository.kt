@@ -71,4 +71,27 @@ class SessionRepository(private val db: AppDatabase) : SessionStore {
         return dao.samplesStrided(id, stride)
     }
     suspend fun channelAggregates(id: String) = dao.channelAggregates(id)
+
+    suspend fun listAll(): List<SessionEntity> = dao.listAll()
+
+    /** Samples between two times (seconds), at most about [maxPoints] of them. */
+    suspend fun samplesInRange(id: String, fromS: Double, toS: Double, maxPoints: Int = 1200): List<SampleEntity> {
+        val fromUs = (fromS * 1e6).toLong()
+        val toUs = (toS * 1e6).toLong()
+        val count = dao.countInRange(id, fromUs, toUs)
+        val stride = ((count + maxPoints - 1) / maxPoints).coerceAtLeast(1)
+        return dao.samplesInRangeStrided(id, fromUs, toUs, stride)
+    }
+
+    /**
+     * Restores one session with its samples, atomically. Returns false (and writes nothing) when a
+     * session with the same id already exists. The stored sample count always matches the rows written.
+     */
+    suspend fun importSession(session: SessionEntity, samples: List<SampleEntity>): Boolean =
+        db.withTransaction {
+            if (dao.get(session.id) != null) return@withTransaction false
+            dao.insertSession(session.copy(sampleCount = samples.size))
+            samples.chunked(500).forEach { dao.insertSamples(it) }
+            true
+        }
 }

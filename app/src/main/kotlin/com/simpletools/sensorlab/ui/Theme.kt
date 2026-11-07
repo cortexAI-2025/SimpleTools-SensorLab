@@ -32,6 +32,8 @@ object ChartColors {
     val single = Color(0xFF12A594)
     val compareA = Color(0xFF3E63DD)
     val compareB = Color(0xFFF76B15)
+    val compareC = Color(0xFF8E4EC6)
+    val compareD = Color(0xFFD6409F)
 }
 
 @Composable

@@ -58,6 +58,19 @@ interface SessionDao {
     @Query("SELECT * FROM samples WHERE sessionId = :id AND (idx % :stride) = 0 ORDER BY idx")
     suspend fun samplesStrided(id: String, stride: Int): List<SampleEntity>
 
+    @Query("SELECT * FROM sessions ORDER BY startedAtMs")
+    suspend fun listAll(): List<SessionEntity>
+
+    @Query("SELECT COUNT(*) FROM samples WHERE sessionId = :id AND tUs BETWEEN :fromUs AND :toUs")
+    suspend fun countInRange(id: String, fromUs: Long, toUs: Long): Int
+
+    /** Time-range slice for a zoomed chart, decimated by [stride]. */
+    @Query(
+        "SELECT * FROM samples WHERE sessionId = :id AND tUs BETWEEN :fromUs AND :toUs " +
+            "AND (idx % :stride) = 0 ORDER BY idx",
+    )
+    suspend fun samplesInRangeStrided(id: String, fromUs: Long, toUs: Long, stride: Int): List<SampleEntity>
+
     @Query("SELECT COUNT(*) FROM samples WHERE sessionId = :id")
     suspend fun countSamples(id: String): Int
 

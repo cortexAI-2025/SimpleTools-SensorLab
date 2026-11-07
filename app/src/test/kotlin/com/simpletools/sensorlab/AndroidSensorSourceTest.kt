@@ -60,6 +60,13 @@ class AndroidSensorSourceTest {
         }
     }
 
+    @Test fun proximitySensorIsDetectedWhenPresent() {
+        addSensor(Sensor.TYPE_PROXIMITY)
+        val p = AndroidSensorSource(context).inventory().first { it.kind == SensorKind.PROXIMITY }
+        assertTrue(p.available)
+        assertEquals(Sensor.TYPE_PROXIMITY, p.androidType)
+    }
+
     @Test fun phoneWithoutAnySensorHasNoAvailableModule() {
         val inv = AndroidSensorSource(context).inventory()
         assertTrue(inv.none { it.available })

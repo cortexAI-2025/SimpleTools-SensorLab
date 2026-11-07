@@ -12,8 +12,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.simpletools.sensorlab.AppContainer
 import com.simpletools.sensorlab.R
 import com.simpletools.sensorlab.core.database.SessionEntity
@@ -30,7 +33,9 @@ import com.simpletools.sensorlab.core.sensors.SensorKind
 import com.simpletools.sensorlab.ui.BigButton
 import com.simpletools.sensorlab.ui.ConfirmDialog
 import com.simpletools.sensorlab.ui.LoadingBox
+import com.simpletools.sensorlab.ui.LockedCard
 import com.simpletools.sensorlab.ui.MessageBox
+import com.simpletools.sensorlab.ui.ProPaywallDialog
 import com.simpletools.sensorlab.ui.ScreenPadding
 import com.simpletools.sensorlab.ui.SectionCard
 import com.simpletools.sensorlab.ui.SensorIcons
@@ -42,7 +47,9 @@ import java.util.Date
 fun SessionsScreen(container: AppContainer, onOpen: (String) -> Unit, onCompare: () -> Unit) {
     // null = still loading, empty list = nothing recorded yet
     val sessions: List<SessionEntity>? by remember { container.sessions.observeAll() }.collectAsState(initial = null)
+    val pro by container.license.state.collectAsStateWithLifecycle()
     var toDelete by remember { mutableStateOf<SessionEntity?>(null) }
+    var showPaywall by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxWidth()) {
@@ -51,22 +58,34 @@ fun SessionsScreen(container: AppContainer, onOpen: (String) -> Unit, onCompare:
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         )
-        when (val list = sessions) {
-            null -> LoadingBox()
-            else -> if (list.isEmpty()) {
-                MessageBox(stringResource(R.string.sessions_empty), Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
-            } else {
-                LazyColumn(contentPadding = ScreenPadding, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    item {
-                        BigButton(stringResource(R.string.compare_open), onCompare, Modifier.fillMaxWidth(), outlined = true, enabled = list.size >= 2)
-                    }
-                    items(list, key = { it.id }) { s ->
-                        SessionRow(s, onClick = { onOpen(s.id) }, onDelete = { toDelete = s })
-                    }
+        val list = sessions
+        when {
+            list == null -> LoadingBox()
+            !pro.isPro -> {
+                // Free: nothing is deleted or hidden; the sessions stay on the phone.
+                LockedCard(
+                    title = stringResource(R.string.locked_title_sessions),
+                    body = stringResource(R.string.locked_body_sessions, list.size),
+                    onUnlock = { showPaywall = true },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+            list.isEmpty() -> MessageBox(stringResource(R.string.sessions_empty), Modifier.padding(horizontal = 16.dp))
+            else -> LazyColumn(contentPadding = ScreenPadding, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                item {
+                    BigButton(
+                        stringResource(R.string.compare_open), onCompare, Modifier.fillMaxWidth(),
+                        outlined = true, enabled = list.size >= 2,
+                    )
+                }
+                items(list, key = { it.id }) { s ->
+                    SessionRow(s, onClick = { onOpen(s.id) }, onDelete = { toDelete = s })
                 }
             }
         }
     }
+
+    if (showPaywall) ProPaywallDialog(container.license) { showPaywall = false }
 
     toDelete?.let { s ->
         ConfirmDialog(
@@ -99,7 +118,7 @@ private fun SessionRow(s: SessionEntity, onClick: () -> Unit, onDelete: () -> Un
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            androidx.compose.material3.TextButton(onClick = onDelete) { Text(stringResource(R.string.action_delete)) }
+            TextButton(onClick = onDelete) { Text(stringResource(R.string.action_delete)) }
         }
     }
 }

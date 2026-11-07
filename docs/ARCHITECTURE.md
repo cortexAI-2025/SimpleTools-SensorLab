@@ -8,6 +8,8 @@ com.simpletools.sensorlab
 ├── core/sensors      SensorKind, SensorInfo, SensorSource (interface), AndroidSensorSource (SensorManager)
 ├── core/measurement  stats, filters, orientation maths, sampling-rate estimator, SessionRecorder (state machine)
 ├── core/database     Room: SessionEntity, SampleEntity, DAO, SessionRepository (implements SessionStore)
+├── core/billing      BillingGateway (Play Billing port), PlayBillingGateway, LicenseManager, licence cache
+├── core/backup       BackupService: whole-device JSON backup and restore
 ├── core/export       CsvExporter (streamed), PdfReport (PdfDocument), ExportService (SAF + FileProvider share)
 ├── core/charts       LineChart (Canvas), NiceScale
 ├── core/settings     AppSettings + DataStore repository
@@ -55,3 +57,14 @@ Hardware event timestamps are used (not wall time). While paused samples are dro
 ## Future extensions (out of V1, not built)
 
 The `SensorSource` and `SessionStore` ports, the stored `method` identifier and the per-session settings summary leave room for: Aura (SimpleTools Pro AI assistant) analysis of sessions, indicative anomaly detection, external Bluetooth sensors (a new `SensorSource`), richer professional reports, SimpleTools Area / NFC Reader integrations and unified FieldKit reports. None of these exist in V1 and no network code is present.
+
+
+## V1.3 additions
+
+- **Licence** (`core/billing`): see [PRO_BILLING.md](PRO_BILLING.md). Entitlement is read through `LicenseManager.state`; screens and ViewModels check it, and `SensorViewModel.startRecording` checks it again. The licence lives in its own DataStore file, separate from settings.
+- **Backup** (`core/backup`, `core/export/SessionJson`): one JSON file `format = simpletools-sensorlab/backup`, `version = 1`, streamed with `JsonWriter` / `JsonReader`. Restore imports each session in its own transaction; sessions whose id already exists are skipped, so a second restore changes nothing. A session still RECORDING in the file comes back INTERRUPTED. A newer version or another format is refused before anything is written.
+- **Single-session JSON export**: same session encoding, one session per file.
+- **Zoom** (`core/charts/ZoomWindow`): pure maths (zoom around an anchor, pan, clamp to the session, minimum span). The visible window is re-queried from Room (`samplesInRange`), decimated in SQL, so zooming shows real detail, not a stretched overview.
+- **Comparison of up to 4 sessions** (reference included): all must match the reference's sensor, unit and method.
+- **Schema**: unchanged, still version 1. No migration was needed; existing sessions are read as they are.
+- **Recorder**: non-finite readings are dropped before storage (SQLite stores NaN as NULL, which would break a NOT NULL column and stop the recording).

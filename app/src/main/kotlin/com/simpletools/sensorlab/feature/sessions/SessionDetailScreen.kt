@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,12 +21,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -34,10 +37,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.simpletools.sensorlab.AppContainer
 import com.simpletools.sensorlab.R
 import com.simpletools.sensorlab.core.charts.ChartSeries
+import com.simpletools.sensorlab.core.charts.LineChart
+import com.simpletools.sensorlab.core.charts.ZoomWindow
 import com.simpletools.sensorlab.core.database.ChannelAggregates
 import com.simpletools.sensorlab.core.database.SessionEntity
 import com.simpletools.sensorlab.core.export.ExportFormat
-import com.simpletools.sensorlab.core.charts.LineChart
+import com.simpletools.sensorlab.core.export.ExportService
 import com.simpletools.sensorlab.core.measurement.DisplayUnits
 import com.simpletools.sensorlab.core.sensors.SensorKind
 import com.simpletools.sensorlab.core.settings.AppSettings
@@ -46,7 +51,9 @@ import com.simpletools.sensorlab.ui.ChartColors
 import com.simpletools.sensorlab.ui.ConfirmDialog
 import com.simpletools.sensorlab.ui.LabeledValue
 import com.simpletools.sensorlab.ui.LoadingBox
+import com.simpletools.sensorlab.ui.LockedCard
 import com.simpletools.sensorlab.ui.MessageBox
+import com.simpletools.sensorlab.ui.ProPaywallDialog
 import com.simpletools.sensorlab.ui.ScreenPadding
 import com.simpletools.sensorlab.ui.ScreenScaffold
 import com.simpletools.sensorlab.ui.SectionCard
@@ -64,6 +71,7 @@ fun SessionDetailScreen(
 ) {
     val vm: SessionDetailViewModel = viewModel(key = "session-$id", factory = SessionDetailViewModel.factory(id, container))
     val state by vm.state.collectAsStateWithLifecycle()
+    val pro by container.license.state.collectAsStateWithLifecycle()
     val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = AppSettings())
     val units = remember(settings) { DisplayUnits(settings) }
     val context = LocalContext.current
@@ -72,6 +80,8 @@ fun SessionDetailScreen(
     val snackbar = remember { SnackbarHostState() }
     var confirmDelete by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    var showPaywall by remember { mutableStateOf(false) }
+    var plotWidth by remember { mutableIntStateOf(1) }
 
     val exportedOk = stringResource(R.string.export_done)
     val exportedFail = stringResource(R.string.export_failed)
@@ -80,13 +90,20 @@ fun SessionDetailScreen(
     val saveCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.CSV.mime)) { uri ->
         if (uri != null) scope.launch { snackbar.showSnackbar(if (writeTo(context, container, id, ExportFormat.CSV, uri)) exportedOk else exportedFail) }
     }
+    val saveJson = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.JSON.mime)) { uri ->
+        if (uri != null) scope.launch { snackbar.showSnackbar(if (writeTo(context, container, id, ExportFormat.JSON, uri)) exportedOk else exportedFail) }
+    }
     val savePdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.PDF.mime)) { uri ->
         if (uri != null) scope.launch { snackbar.showSnackbar(if (writeTo(context, container, id, ExportFormat.PDF, uri)) exportedOk else exportedFail) }
+    }
+    fun save(format: ExportFormat, name: String) = when (format) {
+        ExportFormat.CSV -> saveCsv.launch(name)
+        ExportFormat.JSON -> saveJson.launch(name)
+        ExportFormat.PDF -> savePdf.launch(name)
     }
     fun share(format: ExportFormat) = scope.launch {
         try {
             val uri = container.exports.createShareUri(id, format)
-            // The Activity (not the language-wrapped context) launches the Sharesheet.
             (activity ?: context).startActivity(container.exports.shareIntent(uri, format, shareTitle))
         } catch (e: Exception) {
             snackbar.showSnackbar(exportedFail)
@@ -99,6 +116,15 @@ fun SessionDetailScreen(
             Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(ScreenPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (!pro.isPro) {
+                LockedCard(
+                    title = stringResource(R.string.session_title),
+                    body = stringResource(R.string.locked_body_session),
+                    onUnlock = { showPaywall = true },
+                )
+                if (showPaywall) ProPaywallDialog(container.license) { showPaywall = false }
+                return@Column
+            }
             when (val st = state) {
                 DetailState.Loading -> LoadingBox()
                 DetailState.NotFound -> MessageBox(stringResource(R.string.session_not_found), isError = true)
@@ -125,19 +151,52 @@ fun SessionDetailScreen(
                                 ChartSeries("Y", ChartColors.y, t, FloatArray(chart.size) { units.convert(kind, chart[it].v1) }),
                                 ChartSeries("Z", ChartColors.z, t, FloatArray(chart.size) { units.convert(kind, chart[it].v2) }),
                             ) else listOf(ChartSeries("", ChartColors.single, t, FloatArray(chart.size) { units.convert(kind, chart[it].v0) }))
-                            LineChart(series, units.unit(kind), description = stringResource(R.string.chart_desc, s.name, units.unit(kind)))
+                            LineChart(
+                                series = series,
+                                unit = units.unit(kind),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onSizeChanged { plotWidth = it.width.coerceAtLeast(1) }
+                                    .pointerInput(Unit) {
+                                        detectTransformGestures { centroid, pan, zoom, _ ->
+                                            val w = plotWidth.toFloat()
+                                            vm.gesture(
+                                                zoom = zoom.toDouble(),
+                                                anchor = (centroid.x / w).toDouble().coerceIn(0.0, 1.0),
+                                                panFraction = (-pan.x / w).toDouble(),
+                                            )
+                                        }
+                                    },
+                                xFrom = st.window.start.toFloat(),
+                                xTo = st.window.end.toFloat(),
+                                description = stringResource(R.string.chart_desc, s.name, units.unit(kind)),
+                            )
+                        }
+                        Text(stringResource(R.string.zoom_hint), style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            stringResource(R.string.zoom_range, "%.2f".format(st.window.start), "%.2f".format(st.window.end)),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            BigButton(stringResource(R.string.zoom_in), { vm.zoomIn() }, Modifier.weight(1f), outlined = true)
+                            BigButton(stringResource(R.string.zoom_out), { vm.zoomOut() }, Modifier.weight(1f), outlined = true)
+                            BigButton(stringResource(R.string.zoom_reset), { vm.resetZoom() }, Modifier.weight(1f), enabled = !st.window.isFullRange)
                         }
                     }
                     NoteCard(s) { vm.saveNote(it) }
                     SectionCard(title = stringResource(R.string.export_title)) {
                         Text(stringResource(R.string.export_hint), style = MaterialTheme.typography.bodySmall)
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            BigButton(stringResource(R.string.export_save_csv), { saveCsv.launch(com.simpletools.sensorlab.core.export.ExportService.fileName(s, ExportFormat.CSV)) }, Modifier.weight(1f), outlined = true)
-                            BigButton(stringResource(R.string.export_save_pdf), { savePdf.launch(com.simpletools.sensorlab.core.export.ExportService.fileName(s, ExportFormat.PDF)) }, Modifier.weight(1f), outlined = true)
+                        Text(stringResource(R.string.export_save_label), style = MaterialTheme.typography.labelLarge)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            ExportFormat.entries.forEach { f ->
+                                BigButton(f.extension.uppercase(), { save(f, ExportService.fileName(s, f)) }, Modifier.weight(1f), outlined = true)
+                            }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            BigButton(stringResource(R.string.export_share_csv), { share(ExportFormat.CSV) }, Modifier.weight(1f))
-                            BigButton(stringResource(R.string.export_share_pdf), { share(ExportFormat.PDF) }, Modifier.weight(1f))
+                        Text(stringResource(R.string.export_share_label), style = MaterialTheme.typography.labelLarge)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            ExportFormat.entries.forEach { f ->
+                                BigButton(f.extension.uppercase(), { share(f) }, Modifier.weight(1f))
+                            }
                         }
                     }
                     BigButton(stringResource(R.string.compare_with), { onCompare(s.id) }, Modifier.fillMaxWidth(), outlined = true)
