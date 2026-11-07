@@ -3,6 +3,12 @@ package com.simpletools.sensorlab
 import android.app.Application
 import android.content.Context
 import android.content.res.Configuration
+import com.simpletools.sensorlab.core.backup.BackupService
+import com.simpletools.sensorlab.core.billing.BillingGateway
+import com.simpletools.sensorlab.core.billing.DataStoreLicenseStore
+import com.simpletools.sensorlab.core.billing.LicenseManager
+import com.simpletools.sensorlab.core.billing.LicenseStore
+import com.simpletools.sensorlab.core.billing.PlayBillingGateway
 import com.simpletools.sensorlab.core.database.AppDatabase
 import com.simpletools.sensorlab.core.database.SessionRepository
 import com.simpletools.sensorlab.core.export.ExportService
@@ -25,12 +31,18 @@ class AppContainer(
     val sensorSource: SensorSource = AndroidSensorSource(app),
     databaseFactory: () -> AppDatabase = { AppDatabase.create(app) },
     val settings: SettingsRepository = DataStoreSettingsRepository(app),
+    billing: BillingGateway = PlayBillingGateway(app),
+    licenseStore: LicenseStore = DataStoreLicenseStore(app),
 ) {
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     val database: AppDatabase by lazy(databaseFactory)
     val sessions: SessionRepository by lazy { SessionRepository(database) }
     val exports: ExportService by lazy { ExportService(app, sessions, settings, ::localizedContext) }
+    val backup: BackupService by lazy { BackupService(sessions) }
 
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** PRO entitlement (Google Play, cached for offline use). Starts verifying immediately. */
+    val license: LicenseManager = LicenseManager(billing, licenseStore, appScope)
 
     init {
         // A session left in RECORDING by a crash or a kill is kept and flagged INTERRUPTED.
@@ -38,8 +50,14 @@ class AppContainer(
     }
 
     /** Fire-and-forget work that must outlive a ViewModel (e.g. saving a recording). */
-    fun appScopeLaunch(block: suspend () -> Unit) { appScope.launch { runCatching { block() } } }
+    fun appScopeLaunch(block: suspend () -> Unit) {
+        appScope.launch { runCatching { block() } }
+    }
 
+    /**
+     * Deletes every session and cached export. The PRO licence is not a user data: it is not touched
+     * (Google Play owns the purchase and restores it).
+     */
     suspend fun deleteAllData() {
         sessions.deleteAll()
         exports.clearCache()

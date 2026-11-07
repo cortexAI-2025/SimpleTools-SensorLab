@@ -77,3 +77,34 @@ class FakeSettingsRepository(initial: AppSettings = AppSettings()) : SettingsRep
     override val settings: Flow<AppSettings> = state
     override suspend fun update(transform: (AppSettings) -> AppSettings) { state.value = transform(state.value) }
 }
+
+/** Simulated Google Play. Test source set only. */
+class FakeBillingGateway(
+    var owned: com.simpletools.sensorlab.core.billing.OwnedQuery = com.simpletools.sensorlab.core.billing.OwnedQuery.Unavailable,
+    var price: String? = "4,99 €",
+    var acknowledgeOk: Boolean = true,
+    var launchOk: Boolean = true,
+) : com.simpletools.sensorlab.core.billing.BillingGateway {
+    val acknowledged = mutableListOf<String>()
+    private val events = kotlinx.coroutines.flow.MutableSharedFlow<com.simpletools.sensorlab.core.billing.PurchaseUpdate>(extraBufferCapacity = 8)
+    override val updates: Flow<com.simpletools.sensorlab.core.billing.PurchaseUpdate> = events
+
+    override suspend fun productPrice(): String? = price
+    override suspend fun queryOwned(): com.simpletools.sensorlab.core.billing.OwnedQuery = owned
+    override suspend fun acknowledge(token: String): Boolean {
+        if (acknowledgeOk) acknowledged += token
+        return acknowledgeOk
+    }
+    override suspend fun launchPurchase(activity: android.app.Activity?): Boolean = launchOk
+    suspend fun emit(update: com.simpletools.sensorlab.core.billing.PurchaseUpdate) = events.emit(update)
+}
+
+/** Licence cache in memory. Starts PRO or free, as the test needs. */
+class InMemoryLicenseStore(initialPro: Boolean = false) : com.simpletools.sensorlab.core.billing.LicenseStore {
+    private val state = MutableStateFlow(
+        com.simpletools.sensorlab.core.billing.CachedLicense(initialPro, if (initialPro) "seed" else null, 1L),
+    )
+    val current: com.simpletools.sensorlab.core.billing.CachedLicense get() = state.value
+    override val cached: Flow<com.simpletools.sensorlab.core.billing.CachedLicense> = state
+    override suspend fun save(license: com.simpletools.sensorlab.core.billing.CachedLicense) { state.value = license }
+}

@@ -1,5 +1,7 @@
 package com.simpletools.sensorlab.feature.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,11 +42,17 @@ import com.simpletools.sensorlab.core.settings.ThemeMode
 import com.simpletools.sensorlab.ui.BigButton
 import com.simpletools.sensorlab.ui.ConfirmDialog
 import com.simpletools.sensorlab.ui.LabeledValue
+import com.simpletools.sensorlab.ui.ProPaywallDialog
+import com.simpletools.sensorlab.ui.messageText
+import com.simpletools.sensorlab.core.backup.RestoreError
 import com.simpletools.sensorlab.ui.RadioGroup
 import com.simpletools.sensorlab.ui.ScreenPadding
 import com.simpletools.sensorlab.ui.SectionCard
 import kotlinx.coroutines.launch
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(container: AppContainer) {
@@ -54,6 +63,31 @@ fun SettingsScreen(container: AppContainer) {
     var deleted by remember { mutableStateOf(false) }
     var dbBytes by remember { mutableLongStateOf(0L) }
     val sessionCount by remember { container.sessions.observeAll() }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val license = container.license
+    val proState by license.state.collectAsStateWithLifecycle()
+    var showPaywall by remember { mutableStateOf(false) }
+    var backupMessage by remember { mutableStateOf<BackupResult?>(null) }
+    val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) scope.launch {
+            val written = try {
+                context.contentResolver.openOutputStream(uri, "wt")?.use { container.backup.write(it) }
+            } catch (e: Exception) { null }
+            backupMessage = if (written == null) BackupResult.Failed else BackupResult.Written(written)
+        }
+    }
+    val restoreBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            val report = try {
+                context.contentResolver.openInputStream(uri)?.use { container.backup.restore(it) }
+            } catch (e: Exception) { null }
+            backupMessage = when {
+                report == null -> BackupResult.Failed
+                report.error == RestoreError.UNSUPPORTED -> BackupResult.Unsupported
+                report.error == RestoreError.CORRUPT -> BackupResult.Corrupt
+                else -> BackupResult.Restored(report.imported, report.skipped)
+            }
+        }
+    }
 
     LaunchedEffect(sessionCount.size, deleted) {
         val f = context.getDatabasePath(AppDatabase.FILE_NAME)
@@ -133,6 +167,40 @@ fun SettingsScreen(container: AppContainer) {
                 settings.csvFormat,
             ) { v -> update { it.copy(csvFormat = v) } }
         }
+        SectionCard(title = stringResource(R.string.settings_pro)) {
+            Text(
+                stringResource(if (proState.isPro) R.string.pro_status_active else R.string.pro_status_free),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            if (!proState.isPro) {
+                BigButton(stringResource(R.string.pro_unlock), { showPaywall = true }, Modifier.fillMaxWidth())
+            }
+            BigButton(
+                stringResource(R.string.pro_restore),
+                { scope.launch { license.restore() } },
+                Modifier.fillMaxWidth(), outlined = true, enabled = !proState.busy,
+            )
+            proState.message?.let { Text(messageText(it, proState.code), style = MaterialTheme.typography.bodySmall) }
+            Text(stringResource(R.string.pro_free_note), style = MaterialTheme.typography.bodySmall)
+        }
+        SectionCard(title = stringResource(R.string.backup_title)) {
+            if (!proState.isPro) {
+                Text(stringResource(R.string.locked_body_backup), style = MaterialTheme.typography.bodyMedium)
+            } else {
+                Text(stringResource(R.string.backup_hint), style = MaterialTheme.typography.bodySmall)
+                BigButton(
+                    stringResource(R.string.backup_create),
+                    { createBackup.launch("simpletools-sensorlab-backup-${SimpleDateFormat("yyyyMMdd", Locale.ROOT).format(Date())}.json") },
+                    Modifier.fillMaxWidth(),
+                )
+                BigButton(
+                    stringResource(R.string.backup_restore),
+                    { restoreBackup.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) },
+                    Modifier.fillMaxWidth(), outlined = true,
+                )
+            }
+            backupMessage?.let { Text(it.text(), style = MaterialTheme.typography.bodyMedium) }
+        }
         SectionCard(title = stringResource(R.string.settings_storage)) {
             LabeledValue(stringResource(R.string.storage_sessions), "${sessionCount.size}")
             LabeledValue(stringResource(R.string.storage_size), "%.1f MB".format(dbBytes / 1_048_576.0))
@@ -150,6 +218,8 @@ fun SettingsScreen(container: AppContainer) {
         }
     }
 
+    if (showPaywall) ProPaywallDialog(license) { showPaywall = false }
+
     if (confirmDeleteAll) {
         ConfirmDialog(
             stringResource(R.string.storage_delete_all),
@@ -166,4 +236,22 @@ private fun samplingLabel(p: SamplingPreset) = when (p) {
     SamplingPreset.NORMAL -> R.string.sampling_normal
     SamplingPreset.FAST -> R.string.sampling_fast
     SamplingPreset.MAX -> R.string.sampling_max
+}
+
+/** Outcome of a backup or restore, rendered in Compose (not in the callback). */
+private sealed interface BackupResult {
+    data object Failed : BackupResult
+    data object Unsupported : BackupResult
+    data object Corrupt : BackupResult
+    data class Written(val sessions: Int) : BackupResult
+    data class Restored(val imported: Int, val skipped: Int) : BackupResult
+
+    @Composable
+    fun text(): String = when (this) {
+        Failed -> stringResource(R.string.backup_failed)
+        Unsupported -> stringResource(R.string.backup_unsupported)
+        Corrupt -> stringResource(R.string.backup_corrupt)
+        is Written -> stringResource(R.string.backup_done, sessions)
+        is Restored -> stringResource(R.string.backup_restored, imported, skipped)
+    }
 }

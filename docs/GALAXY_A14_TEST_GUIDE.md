@@ -1,4 +1,4 @@
-# Acceptance guide — Samsung Galaxy A14, Android 15
+# Acceptance guide — Samsung Galaxy A14, Android 15 (FREE / PRO 1.3.0)
 
 > Status: this procedure has **not** been executed on a physical Galaxy A14 by the author of the code (no device access). It is the recette to run. Missing sensors are **not** failures: the A14 typically has an accelerometer, a light/proximity sensor and a magnetometer; a gyroscope, barometer and ambient-temperature sensor may be absent — the app must then say so.
 
@@ -23,3 +23,18 @@ Record for each step: PASS / FAIL / N/A (sensor absent) and the observation.
 17. **No crash**: also test rotation during a measurement, back navigation, a second session + *Comparer*, *Supprimer toutes les données*, language switch FR/EN.
 
 Extras: lock the screen during a recording → recording must pause (V1 is foreground only). Android Settings → Apps → SensorLab → Permissions must list none.
+
+
+## V1.3 additions (FREE / PRO)
+
+Run these after the steps above, on a build installed from Google Play internal testing (see docs/PRO_BILLING.md for the Play part).
+
+18. **Free version**: Settings shows "Version gratuite". A sensor screen shows the recording lock, not the recording controls. Sessions screen shows "Historique PRO" with the number of sessions kept.
+19. **Proximity** (if present): cover and uncover the sensor; the value changes, or shows near/far on binary sensors.
+20. **Android accuracy** row appears on sensors that report it.
+21. **PRO purchase** via the license-tester account (checklist in docs/PRO_BILLING.md), then recording, history, zoom, compare, export and backup unlock without restart.
+22. **Zoom**: pinch the chart in and out, drag to scroll, buttons Zoom +, Zoom −, Vue complète; the window label updates.
+23. **Multi-session comparison**: pick a reference and up to three compatible sessions; the table shows the Δ and Δ% per column; the overlay shows every curve.
+24. **Exports**: save and share CSV, JSON and PDF; open the JSON in a text editor (readable keys, no NaN).
+25. **Backup**: Settings → Sauvegarde locale → create; delete all data; restore the file: the sessions come back, the counts match, a second restore imports 0.
+26. **Restart and offline**: airplane mode, restart: PRO and the data are still there.

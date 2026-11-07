@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -54,6 +55,7 @@ fun DashboardScreen(
     val inventory = remember { container.sensorSource.inventory() }
     val hardware = remember { container.sensorSource.hardwareSensors() }
     val latest by remember { container.sessions.observeLatest() }.collectAsState(initial = null)
+    val pro by container.license.state.collectAsStateWithLifecycle()
     val battery = remember { batteryPercent(context) }
     val available = inventory.count { it.available }
     var showHardware by remember { mutableStateOf(false) }
@@ -87,7 +89,9 @@ fun DashboardScreen(
         item {
             SectionCard(title = stringResource(R.string.dash_last_session)) {
                 val s = latest
-                if (s == null) {
+                if (!pro.isPro) {
+                    Text(stringResource(R.string.dash_pro_hint), style = MaterialTheme.typography.bodyMedium)
+                } else if (s == null) {
                     Text(stringResource(R.string.dash_no_session), style = MaterialTheme.typography.bodyMedium)
                 } else {
                     val kind = SensorKind.fromKey(s.kindKey)

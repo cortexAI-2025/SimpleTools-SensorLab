@@ -20,12 +20,14 @@ androidxDatastore = "1.1.7"
 androidxRoom = "2.8.3"
 androidxFileprovider = "1.1.0"
 kotlinxCoroutines = "1.10.2"
+billing = "8.3.0"
 
 junit = "4.13.2"
 androidxTestCore = "1.7.0"
 robolectric = "4.16"
 
 [libraries]
+androidx-billing-ktx = { module = "com.android.billingclient:billing-ktx", version.ref = "billing" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidxActivity" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidxLifecycle" }

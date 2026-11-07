@@ -36,6 +36,10 @@ import kotlin.math.max
  */
 class SensorViewModel(private val kind: SensorKind, private val container: AppContainer) : ViewModel() {
 
+    /** PRO check at the moment of the action: the UI already hides the control, this is the second lock. */
+    private val isPro: Boolean get() = container.license.state.value.isPro
+
+
     private val info = container.sensorSource.inventory().first { it.kind == kind }
     private val _ui = MutableStateFlow(
         SensorUiState(info, status = if (info.available) LiveStatus.STOPPED else LiveStatus.UNAVAILABLE),
@@ -213,6 +217,7 @@ class SensorViewModel(private val kind: SensorKind, private val container: AppCo
     fun resetCalibration() { transform.reference = null; publish() }
 
     fun startRecording(name: String) {
+        if (!isPro) return
         if (!info.available || !started) return
         val cur = recorder
         if (cur != null && cur.state != RecorderState.FINISHED && cur.state != RecorderState.FAILED) return

@@ -129,6 +129,8 @@ class SessionRecorder(
 
     /** Feed one transformed sample. Cheap unless a batch is flushed. */
     suspend fun onSample(timestampNs: Long, values: FloatArray, scalar: Float) = lock.withLock {
+        // A non-finite reading cannot be stored (SQLite turns NaN into NULL): it is dropped, not recorded.
+        if (!scalar.isFinite() || values.any { !it.isFinite() }) return@withLock
         handleSample(timestampNs, values, scalar)
     }
 
